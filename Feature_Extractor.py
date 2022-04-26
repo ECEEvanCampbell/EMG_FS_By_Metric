@@ -145,7 +145,7 @@ class Feature_Extractor:
         m0 = np.sqrt(np.sum(windows**2,axis=2))
         m0 = m0 ** 0.1 / 0.1
         #Feature extraction goes here
-        return np.abs(np.log(m0))
+        return np.log(np.abs(m0))
     
     def getM2feat(self, windows):
         # Prepare derivatives for higher order moments
@@ -153,7 +153,7 @@ class Feature_Extractor:
         # Root squared 2nd order moments normalized
         m2 = np.sqrt(np.sum(d1 **2, axis=2)/ (windows.shape[2]-1))
         m2 = m2 ** 0.1 / 0.1
-        return np.abs(np.log(m2))
+        return np.log(np.abs(m2))
 
     def getM4feat(self, windows):
         # Prepare derivatives for higher order moments
@@ -162,21 +162,21 @@ class Feature_Extractor:
         # Root squared 4th order moments normalized
         m4 = np.sqrt(np.sum(d2**2,axis=2) / (windows.shape[2]-1))
         m4 = m4 **0.1/0.1
-        return np.abs(np.log(m4))
+        return np.log(np.abs(m4))
     
     def getSPARSIfeat(self, windows):
         m0 = self.getM0feat(windows)
         m2 = self.getM2feat(windows)
         m4 = self.getM4feat(windows)
         sparsi = m0/np.sqrt(np.abs((m0-m2)*(m0-m4)))
-        return np.abs(np.log(sparsi))
+        return np.log(np.abs(sparsi))
 
     def getIRFfeat(self, windows):
         m0 = self.getM0feat(windows)
         m2 = self.getM2feat(windows)
         m4 = self.getM4feat(windows)
         IRF = m2/np.sqrt(np.multiply(m0,m4))
-        return np.abs(np.log(IRF))
+        return np.log(np.abs(IRF))
 
     def getWLFfeat(self, windows):
         # Prepare derivatives for higher order moments
@@ -184,8 +184,7 @@ class Feature_Extractor:
         d2 = np.diff(d1     , n=1, axis=2)
         # Waveform Length Ratio
         WLR = np.sum( np.abs(d1),axis=2)-np.sum(np.abs(d2),axis=2)
-        return np.abs(np.log(WLR))
-
+        return np.log(np.abs(WLR))
     # def getTDPSDfeat(self, windows):
     #     # There are 6 features per channel
     #     features = np.zeros((windows.shape[0], self.num_channels*6), dtype=float)
