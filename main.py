@@ -83,7 +83,7 @@ class Dataset:
 def main(args=None):
     analysis_parameters = {
         "motion_type": "Ramp",
-        "metric": ["accuracy", "argmax"],
+        "metric": ["msa", "argmax"],# ["accuracy", "argmax"], ["activeaccuracy", "argmax"]
         "feature_list": ['all'],
         "window_size": 200,
         "window_inc": 100,
