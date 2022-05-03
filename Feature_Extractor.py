@@ -1,4 +1,6 @@
 import numpy as np
+from scipy.stats import skew, kurtosis
+import sampen
 
 class Feature_Extractor:
     def __init__(self, num_channels):
@@ -22,7 +24,19 @@ class Feature_Extractor:
                         'M4',
                         'SPARSI',
                         'IRF',
-                        'WLF']
+                        'WLF',
+                        'AR', # note: TODO: AR could probably represent the PACF, not the ACF.
+                        'CC',
+                        'LD',
+                        'MAVFD',
+                        'MAVSLP',
+                        'MDF',
+                        'MNF',
+                        'MNP',
+                        'MPK',
+                        'SAMPEN',
+                        'SKEW',
+                        'KURT']
         return feature_list
 
     def extract(self, feature_list, windows):
@@ -30,6 +44,7 @@ class Feature_Extractor:
         for feature in feature_list:
             method_to_call = getattr(self, 'get' + feature + 'feat')
             features[feature] = method_to_call(windows)
+            
         return features
 
     def getMAVfeat(self, windows):
@@ -185,45 +200,86 @@ class Feature_Extractor:
         # Waveform Length Ratio
         WLR = np.sum( np.abs(d1),axis=2)-np.sum(np.abs(d2),axis=2)
         return np.log(np.abs(WLR))
-    # def getTDPSDfeat(self, windows):
-    #     # There are 6 features per channel
-    #     features = np.zeros((windows.shape[0], self.num_channels*6), dtype=float)
-    #     # TDPSD feature set adapted from: https://github.com/RamiKhushaba/getTDPSDfeat
-    #     # Extract the features from original signal and nonlinear version
-    #     ebp = self.KSM1(windows)
-    #     # np.spacing = epsilon (smallest value), done so log does not return inf.
-    #     efp = self.KSM1(np.log(windows**2 + np.spacing(1)))
-    #     # Correlation analysis:
-    #     num = -2*np.multiply(efp, ebp)
-    #     den = np.multiply(efp, efp) + np.multiply(ebp,ebp)
-    #     #Feature extraction goes here
-    #     features = num-den
-    #     return features
 
-    # def KSM1(self, signals):
-    #     samples = signals.shape[2]
-    #     channels = signals.shape[1]
-    #     # Root squared zero moment normalized
-    #     m0 = np.sqrt(np.sum(signals**2,axis=2))
-    #     m0 = m0 ** 0.1 / 0.1
-    #     # Prepare derivatives for higher order moments
-    #     d1 = np.diff(signals, n=1, axis=2)
-    #     d2 = np.diff(d1     , n=1, axis=2)
-    #     # Root squared 2nd and 4th order moments normalized
-    #     m2 = np.sqrt(np.sum(d1 **2, axis=2)/ (samples-1))
-    #     m2 = m2 ** 0.1 / 0.1
-    #     m4 = np.sqrt(np.sum(d2**2,axis=2) / (samples-1))
-    #     m4 = m4 **0.1/0.1
 
-    #     # Sparseness
-    #     sparsi = m0/np.sqrt(np.abs((m0-m2)*(m0-m4)))
+    def getARfeat(self, windows, order=4):
+        windows = np.asarray(windows)
+        R = np.sum(windows ** 2, axis=2)
+        for i in range(1, order + 1):
+            r = np.sum(windows[:,:,i:] * windows[:,:,:-i], axis=2)
+            R = np.hstack((R,r))
+        return R
 
-    #     # Irregularity factor
-    #     IRF = m2/np.sqrt(np.multiply(m0,m4))
+    def getCCfeat(self, windows, order =4):
+        AR = self.getARfeat(windows, order)
+        cc = np.zeros_like(AR)
+        cc[:,:self.num_channels] = -1*AR[:,:self.num_channels]
+        if order > 2:
+            for p in range(2,order+2):
+                for l in range(1, p):
+                    cc[:,self.num_channels*(p-1):self.num_channels*(p)] = cc[:,self.num_channels*(p-1):self.num_channels*(p)]+(AR[:,self.num_channels*(p-1):self.num_channels*(p)] * cc[:,self.num_channels*(p-2):self.num_channels*(p-1)] * (1-(l/p)))
+        return cc
+    
+    def getLDfeat(self, windows):
+        return np.exp(np.mean(np.log(np.abs(windows)+1), 2))
 
-    #     # Waveform Length Ratio
-    #     WLR = np.sum( np.abs(d1),axis=2)-np.sum(np.abs(d2),axis=2)
+    def getMAVFDfeat(self, windows):
+        dwindows = np.diff(windows,axis=2)
+        mavfd = np.mean(dwindows,axis=2) / windows.shape[2]
+        return mavfd
 
-    #     Feat = np.concatenate((m0, m0-m2, m0-m4, sparsi, IRF, WLR), axis=1)
-    #     Feat = np.log(np.abs(Feat))
-    #     return Feat
+    def getMAVSLPfeat(self, windows, segment=2):
+        m = int(round(windows.shape[2]/segment))
+        mav = []
+        mavslp = []
+        for i in range(0,segment):
+            mav.append(np.mean(np.abs(windows[:,:,i*m:(i+1)*m]), axis=2))
+        for i in range (0, segment-1):
+            mavslp.append(mav[i+1]- mav[i])
+        return np.asarray(mavslp).squeeze()
+
+    def getMDFfeat(self, windows,fs=1000):
+        spec = np.fft.fft(windows,axis=2)
+        spec = spec[:,:,0:int(round(spec.shape[2]/2))]
+        POW = spec * np.conj(spec)
+        totalPOW = np.sum(POW, axis=2)
+        cumPOW   = np.cumsum(POW, axis=2)
+        medfreq = np.zeros((windows.shape[0], windows.shape[1]))
+        for i in range(0, windows.shape[0]):
+            for j in range(0, windows.shape[1]):
+                medfreq[i,j] = fs*np.argwhere(cumPOW[i,j,:] > totalPOW[i,j] /2)[0]/windows.shape[2]/2
+        return medfreq
+
+    def getMNFfeat(self, windows, fs=1000):
+        spec = np.fft.fft(windows, axis=2)
+        f = np.fft.fftfreq(windows.shape[-1])*fs
+        spec = spec[:,:,0:int(round(spec.shape[2]/2))]
+        f = f[0:int(round(f.shape[0]/2))]
+        f = np.repeat(f[np.newaxis, :], spec.shape[0], axis=0)
+        f = np.repeat(f[:, np.newaxis,:], spec.shape[1], axis=1)
+        POW = spec * np.conj(spec)
+        return np.real(np.sum(POW*f,axis=2)/np.sum(POW,axis=2))
+
+    def getMNPfeat(self, windows):
+        spec = np.fft.fft(windows,axis=2)
+        spec = spec[:,:,0:int(round(spec.shape[0]/2))]
+        POW = np.real(spec*np.conj(spec))
+        return np.sum(POW, axis=2)/POW.shape[2]
+
+    def getMPKfeat(self, windows):
+        return windows.max(axis=2)
+
+    def getSAMPENfeat(self, windows, m=2, r_multiply_by_sigma=.2):
+        r = r_multiply_by_sigma * np.std(windows, axis=2)
+        output = np.zeros((windows.shape[0], windows.shape[1]*(m+1)))
+        for w in range(0, windows.shape[0]):
+            for c in range(0, windows.shape[1]):
+                output[w,c*(m+1):(c+1)*(m+1)] = np.array(sampen.sampen2(data=windows[w,c,:], mm=m, r=r[w,c]))[:,1]
+        return output
+
+    def getSKEWfeat(self, windows):
+        return skew(windows, axis=2)
+
+
+    def getKURTfeat(self, windows):
+        return kurtosis(windows, axis=2)
